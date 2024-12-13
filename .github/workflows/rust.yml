@@ -21,7 +21,7 @@ env:
 
 jobs:
   cargo-fmt:
-    runs-on: ['self-hosted', 'linux', 'x64', 'ubuntu-latest']
+    runs-on: [self-hosted, linux, x64, amazon]
 
     steps:
       - name: Checkout
@@ -44,3 +44,4 @@ jobs:
 
       - name: cargo fmt
         run: cargo fmt --all -- --check
+#test 2
