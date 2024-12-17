@@ -21,8 +21,8 @@ env:
 
 jobs:
   cargo-fmt:
-    runs-on: [self-hosted, linux, x64, amazon]
-
+#    runs-on: [self-hosted, linux, x64, ubuntu-latest]
+    runs-on: runs-on=${{ github.run_id }}/cpu=8+16/ram=16+32/family=m7a+m7i-flex/image=ubuntu22-full-x64
     steps:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
@@ -44,4 +44,3 @@ jobs:
 
       - name: cargo fmt
         run: cargo fmt --all -- --check
-#test 2
