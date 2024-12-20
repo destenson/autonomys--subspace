@@ -704,7 +704,7 @@ mod pallet {
     #[pallet::storage]
     pub(super) type AccumulatedTreasuryFunds<T> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
-    /// Storage used to keep track of which consensus block the domain runtime upgrade happen.
+    /// Storage used to keep track of which consensus block each domain runtime upgrade happens in.
     #[pallet::storage]
     pub type DomainRuntimeUpgradeRecords<T: Config> = StorageMap<
         _,
@@ -714,8 +714,8 @@ mod pallet {
         ValueQuery,
     >;
 
-    /// Temporary storage keep track of domain runtime upgrade happen in the current block, cleared
-    /// in the next block initialization.
+    /// Temporary storage to keep track of domain runtime upgrades which happened in the parent
+    /// block. Cleared in the current block's initialization.
     #[pallet::storage]
     pub type DomainRuntimeUpgrades<T> = StorageValue<_, Vec<RuntimeId>, ValueQuery>;
 
@@ -2984,7 +2984,7 @@ impl<T: Config> Pallet<T> {
     }
 
     // Get the domain runtime code that used to derive `receipt`, if the runtime code still present in
-    // the state then get it from the state otherwise from the `maybe_domain_runtime_code_at` prood.
+    // the state then get it from the state otherwise from the `maybe_domain_runtime_code_at` proof.
     pub fn get_domain_runtime_code_for_receipt(
         domain_id: DomainId,
         receipt: &ExecutionReceiptOf<T>,

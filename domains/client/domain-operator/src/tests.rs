@@ -2902,7 +2902,7 @@ async fn test_invalid_domain_extrinsics_root_proof_creation() {
 
     // When the domain node operator process the primary block that contains the `bad_submit_bundle_tx`,
     // it will generate and submit a fraud proof
-    let _ = wait_for_fraud_proof_fut.await;
+    wait_for_fraud_proof_fut.await;
 
     // Produce a consensus block that contains the fraud proof, the fraud proof wil be verified
     // and executed, thus pruned the bad receipt from the block tree
