@@ -2,6 +2,7 @@
 
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 use std::default::Default;
 use std::sync::Arc;
 use subspace_core_primitives::hashes::{blake3_hash, Blake3Hash};
@@ -28,17 +29,33 @@ struct ObjectMapping {
     hash: Blake3Hash,
     piece_index: PieceIndex,
     piece_offset: u32,
-    #[serde(deserialize_with = "string_to_u32")]
+    // TODO: when the HTTP server starts sending integers, remove this custom function
+    #[serde(deserialize_with = "string_or_int_to_u32")]
     block_number: BlockNumber,
 }
 
-/// Utility function to deserialize a JSON string into a u32.
-fn string_to_u32<'de, D>(deserializer: D) -> Result<u32, D::Error>
+/// Utility function to deserialize a JSON string or integer into a u32.
+fn string_or_int_to_u32<'de, D>(deserializer: D) -> Result<u32, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let s: String = Deserialize::deserialize(deserializer)?;
-    s.parse::<u32>().map_err(serde::de::Error::custom)
+    let v: serde_json::Value = Deserialize::deserialize(deserializer)?;
+
+    match v {
+        Value::String(s) => s.parse::<u32>().map_err(serde::de::Error::custom),
+        Value::Number(n) => {
+            if let Some(n) = n.as_u64() {
+                if n <= u32::MAX as u64 {
+                    return Ok(n as u32);
+                }
+            }
+
+            Err(serde::de::Error::custom("block_number is not a u32"))
+        }
+        _ => Err(serde::de::Error::custom(
+            "block_number is not a Number or String",
+        )),
+    }
 }
 
 /// Requests an object mapping with `hash` from the indexer service.
