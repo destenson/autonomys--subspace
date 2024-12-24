@@ -240,8 +240,8 @@ mod pallet {
     use sp_domains_fraud_proof::storage_proof::{self, FraudProofStorageKeyProvider};
     use sp_domains_fraud_proof::{InvalidTransactionCode, StatelessDomainRuntimeCall};
     use sp_runtime::traits::{
-        AtLeast32BitUnsigned, BlockNumberProvider, CheckEqual, CheckedAdd, Header as HeaderT,
-        MaybeDisplay, One, SimpleBitOps, Zero,
+        AtLeast32BitUnsigned, BlockNumberProvider, CheckEqual, CheckedAdd, CheckedSub,
+        Header as HeaderT, MaybeDisplay, One, SimpleBitOps, Zero,
     };
     use sp_runtime::Saturating;
     use sp_std::boxed::Box;
@@ -1868,37 +1868,43 @@ mod pallet {
     // TODO: proper benchmark
     impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
         fn on_initialize(block_number: BlockNumberFor<T>) -> Weight {
-            let parent_number = block_number - One::one();
-            let parent_hash = frame_system::Pallet::<T>::block_hash(parent_number);
+            // At genesis, avoid block number underflow, and use the default zero genesis parent hash.
+            let parent_number = block_number.checked_sub(&One::one());
+            let parent_hash = parent_number
+                .map(|parent_number| frame_system::Pallet::<T>::block_hash(parent_number))
+                .unwrap_or_default();
 
-            // Record any previous domain runtime upgrade in `DomainRuntimeUpgradeRecords` and then do the
-            // domain runtime upgrade scheduled in the current block
-            for runtime_id in DomainRuntimeUpgrades::<T>::take() {
-                let reference_count = RuntimeRegistry::<T>::get(runtime_id)
-                    .expect("Runtime object must be present since domain is insantiated; qed")
-                    .instance_count;
-                if !reference_count.is_zero() {
-                    DomainRuntimeUpgradeRecords::<T>::mutate(runtime_id, |upgrade_record| {
-                        upgrade_record.insert(
-                            parent_number,
-                            DomainRuntimeUpgradeEntry {
-                                at_hash: parent_hash,
-                                reference_count,
-                            },
-                        )
+            // By definition, the genesis block doesn't have any previous domain runtime upgrades.
+            if let Some(parent_number) = parent_number {
+                // Record any previous domain runtime upgrade in `DomainRuntimeUpgradeRecords` and then do the
+                // domain runtime upgrade scheduled in the current block.
+                for runtime_id in DomainRuntimeUpgrades::<T>::take() {
+                    let reference_count = RuntimeRegistry::<T>::get(runtime_id)
+                        .expect("Runtime object must be present since domain is insantiated; qed")
+                        .instance_count;
+                    if !reference_count.is_zero() {
+                        DomainRuntimeUpgradeRecords::<T>::mutate(runtime_id, |upgrade_record| {
+                            upgrade_record.insert(
+                                parent_number,
+                                DomainRuntimeUpgradeEntry {
+                                    at_hash: parent_hash,
+                                    reference_count,
+                                },
+                            )
+                        });
+                    }
+                }
+                do_upgrade_runtimes::<T>(block_number);
+
+                // Store the hash of the parent consensus block for domains that have bundles submitted
+                // in that consensus block
+                for (domain_id, _) in SuccessfulBundles::<T>::drain() {
+                    ConsensusBlockHash::<T>::insert(domain_id, parent_number, parent_hash);
+                    T::DomainBundleSubmitted::domain_bundle_submitted(domain_id);
+                    DomainSudoCalls::<T>::mutate(domain_id, |sudo_call| {
+                        sudo_call.clear();
                     });
                 }
-            }
-            do_upgrade_runtimes::<T>(block_number);
-
-            // Store the hash of the parent consensus block for domain that have bundles submitted
-            // in that consensus block
-            for (domain_id, _) in SuccessfulBundles::<T>::drain() {
-                ConsensusBlockHash::<T>::insert(domain_id, parent_number, parent_hash);
-                T::DomainBundleSubmitted::domain_bundle_submitted(domain_id);
-                DomainSudoCalls::<T>::mutate(domain_id, |sudo_call| {
-                    sudo_call.clear();
-                });
             }
 
             for (operator_id, slot_set) in OperatorBundleSlot::<T>::drain() {
@@ -1914,12 +1920,17 @@ mod pallet {
         }
 
         fn on_finalize(block_number: BlockNumberFor<T>) {
-            let parent_number = block_number - One::one();
-            let domain_runtime_upgrade_ids = DomainRuntimeUpgradeRecords::<T>::iter()
-                .flat_map(|(runtime_id, upgrade_map)| {
-                    upgrade_map.get(&parent_number).map(|_entry| runtime_id)
-                })
-                .collect::<Vec<RuntimeId>>();
+            let parent_number = block_number.checked_sub(&One::one());
+            let domain_runtime_upgrade_ids = if let Some(parent_number) = parent_number {
+                DomainRuntimeUpgradeRecords::<T>::iter()
+                    .flat_map(|(runtime_id, upgrade_map)| {
+                        upgrade_map.get(&parent_number).map(|_entry| runtime_id)
+                    })
+                    .collect::<Vec<RuntimeId>>()
+            } else {
+                // By definition, the genesis block doesn't have any parent block or any runtime upgrades
+                Vec::new()
+            };
 
             // If this consensus block will derive any domain block, gather the necessary storage for potential fraud proof usage
             if SuccessfulBundles::<T>::iter_keys().count() > 0
